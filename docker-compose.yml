@@ -1,0 +1,40 @@
+version: "3.8"
+
+services:
+  remote-dev:
+    image: thilina01/remote-dev-vpn-ssh:0.0.3
+    deploy:
+      replicas: 1
+    ports:
+      - "2221:22"  # Bind the container's SSH server to 2221 on the host
+      - "2222:2222"  # Forward the remote server's SSH port via the container
+      - "7777:7777"  # Port for Code Server
+    privileged: true  # Required for TUN/TAP
+    cap_add:
+      - NET_ADMIN
+    # devices:
+    #   - /dev/net/tun:/dev/net/tun
+    volumes:
+      - ./vpn-config.ovpn:/etc/openvpn/vpn-config.ovpn:ro  # VPN configuration
+    environment:
+      VPN_CONFIG_PATH: "/etc/openvpn/vpn-config.ovpn"
+      SSH_USER: "thilina"  # SSH username for remote access
+      SSH_PASSWORD: "Thilina@12"  # SSH password for remote access
+      REMOTE_SSH_HOST: "192.168.1.53"  # Remote SSH host IP
+      REMOTE_SSH_PORT: "22"  # Remote SSH port
+      REMOTE_CODE_SERVER_HOST: "192.168.1.53"  # Remote Code Server host IP
+      REMOTE_CODE_SERVER_PORT: "7777"  # Remote Code Server port
+    secrets:
+      - vpn_password
+
+secrets:
+  vpn_password:
+    external: true
+
+
+# echo -e "VPN_USERNAME\nVPN_PASSWORD**" | docker secret create vpn_password -
+
+# docker stack deploy -c docker-compose.yml remote-dev-stack
+
+#  ssh -v -p 2222 thilina@localhost
+# ssh-keygen -R "[localhost]:2222"
