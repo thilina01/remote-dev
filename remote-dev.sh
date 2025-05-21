@@ -6,9 +6,46 @@ CONFIG_FILE="./remote-dev.conf"
 if [[ -f "$CONFIG_FILE" ]]; then
   source "$CONFIG_FILE"
 else
-  echo "❌ Config file '$CONFIG_FILE' not found."
+  cat <<'EOF' > "$CONFIG_FILE"
+# remote-dev.conf — fill in before re-running remote-dev.sh
+# Remote‐Dev defaults
+DEFAULT_REMOTE_HOST=192.168.1.100
+
+# SSH & CodeServer credentials
+SSH_USER=your_ssh_user
+SSH_PASSWORD=your_ssh_password
+
+# Container & image names
+IMAGE_NAME=your/image:tag
+CONTAINER_NAME=remote-dev-container
+
+# Ports
+PORT_SSH=2222
+PORT_SSH_FORWARD=2222
+PORT_CODE_SERVER=7777
+
+# (Optional) override where to store encrypted VPN files.
+# If unset, defaults to ~/.config/remote-dev
+# CONFIG_DIR="$HOME/.my-vpn-secrets"
+EOF
+
+  echo "🔧 A new config template has been created at $CONFIG_FILE."
+  echo "👉 Opening it in VSCode so you can fill in your values…"
+  code --new-window "$CONFIG_FILE"
   exit 1
 fi
+
+#
+# ─── NEW: CENTRALIZE CONFIG_DIR & DERIVED VPN PATHS ────────────────────────────
+#
+# Allow user to override CONFIG_DIR in remote-dev.conf; otherwise default here:
+CONFIG_DIR="${CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/remote-dev}"
+VPN_PASSWORD_FILE="$CONFIG_DIR/vpn.pass.enc"
+VPN_CONFIG_FILE="$CONFIG_DIR/vpn.conf.enc"
+mkdir -p "$CONFIG_DIR"
+#
+# ────────────────────────────────────────────────────────────────────────────────
+#
 
 COMMAND=""
 REMOTE_HOST="$DEFAULT_REMOTE_HOST"
@@ -63,6 +100,10 @@ cleanup() {
 trap cleanup EXIT
 
 ensure_encrypted_credentials() {
+  # make sure the directory for those encrypted files exists
+  mkdir -p "$(dirname "$VPN_PASSWORD_FILE")"
+  mkdir -p "$(dirname "$VPN_CONFIG_FILE")"
+
   local created=false
 
   if [[ ! -f "$VPN_PASSWORD_FILE" ]]; then
@@ -88,24 +129,32 @@ ensure_encrypted_credentials() {
     echo
 
     [[ -n "${vpn_user:-}" && -n "${vpn_pass:-}" ]] && \
-      echo -e "$vpn_user\n$vpn_pass" | openssl enc -aes-256-cbc -pbkdf2 -salt -out "$VPN_PASSWORD_FILE" -pass pass:"$passphrase"
+      echo -e "$vpn_user\n$vpn_pass" \
+        | openssl enc -aes-256-cbc -pbkdf2 -salt \
+            -out "$VPN_PASSWORD_FILE" \
+            -pass pass:"$passphrase"
 
     [[ -n "${vpn_config:-}" ]] && \
-      echo "$vpn_config" | openssl enc -aes-256-cbc -pbkdf2 -salt -out "$VPN_CONFIG_FILE" -pass pass:"$passphrase"
+      echo "$vpn_config" \
+        | openssl enc -aes-256-cbc -pbkdf2 -salt \
+            -out "$VPN_CONFIG_FILE" \
+            -pass pass:"$passphrase"
   else
     read -rsp "🔑 Enter passphrase to decrypt credentials: " passphrase
     echo
   fi
 
-  openssl enc -d -aes-256-cbc -pbkdf2 -in "$VPN_PASSWORD_FILE" -pass pass:"$passphrase" -out "$DECRYPTED_TEMP_VPN_PASS" || {
-    echo "❌ Failed to decrypt VPN password."
-    exit 1
-  }
+  openssl enc -d -aes-256-cbc -pbkdf2 \
+    -in "$VPN_PASSWORD_FILE" \
+    -pass pass:"$passphrase" \
+    -out "$DECRYPTED_TEMP_VPN_PASS" \
+      || { echo "❌ Failed to decrypt VPN password."; exit 1; }
 
-  openssl enc -d -aes-256-cbc -pbkdf2 -in "$VPN_CONFIG_FILE" -pass pass:"$passphrase" -out "$DECRYPTED_TEMP_OVPN" || {
-    echo "❌ Failed to decrypt VPN config."
-    exit 1
-  }
+  openssl enc -d -aes-256-cbc -pbkdf2 \
+    -in "$VPN_CONFIG_FILE" \
+    -pass pass:"$passphrase" \
+    -out "$DECRYPTED_TEMP_OVPN" \
+      || { echo "❌ Failed to decrypt VPN config."; exit 1; }
 }
 
 setup_persistent_ssh_key() {
@@ -139,7 +188,7 @@ start_container() {
   setup_persistent_ssh_key
   setup_ssh_config
 
-  echo "🚀 Starting $APP_NAME container with $RUNTIME..."
+  echo "🚀 Starting $CONTAINER_NAME container with $RUNTIME..."
   $RUNTIME run -d --rm \
     --name "$CONTAINER_NAME" \
     --privileged \
@@ -233,9 +282,6 @@ case "$COMMAND" in
     ;;
   stop)
     stop_container
-    ;;
-  ssh)
-    ssh_connect
     ;;
   connect)
     connect
